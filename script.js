@@ -1,3 +1,6 @@
+// Import API module (in a real project, you might use ES6 modules)
+// For this example, we'll assume the API code is included before this file
+
 // DOM Elements
 const searchInput = document.querySelector('.search-input');
 const searchBtn = document.querySelector('.search-btn');
@@ -20,12 +23,14 @@ const visibilityEl = document.getElementById('visibility');
 const cloudinessEl = document.getElementById('cloudiness');
 const forecastContainer = document.getElementById('forecast-container');
 
-// API Configuration
-const API_KEY = 'bd5e378503939ddaee76f12ad7a97608'; // Free OpenWeatherMap API key
-const BASE_URL = 'https://api.openweathermap.org/data/2.5';
-
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
+    // Check API key validity
+    if (!weatherAPI.isApiKeyValid()) {
+        showError('Please configure a valid OpenWeatherMap API key.');
+        return;
+    }
+
     // Check if user has a saved location
     const savedLocation = localStorage.getItem('lastSearchedLocation');
     if (savedLocation) {
@@ -51,11 +56,20 @@ document.addEventListener('DOMContentLoaded', () => {
 // Handle search functionality
 function handleSearch() {
     const city = searchInput.value.trim();
-    if (city) {
-        // Save the searched location
-        localStorage.setItem('lastSearchedLocation', city);
-        getWeatherByCity(city);
+    
+    if (!city) {
+        showError('Please enter a city name.');
+        return;
     }
+    
+    if (!weatherAPI.validateCityName(city)) {
+        showError('Please enter a valid city name.');
+        return;
+    }
+
+    // Save the searched location
+    localStorage.setItem('lastSearchedLocation', city);
+    getWeatherByCity(city);
 }
 
 // Get weather by city name
@@ -63,31 +77,10 @@ async function getWeatherByCity(city) {
     showLoading();
     
     try {
-        // Fetch current weather
-        const currentWeatherResponse = await fetch(
-            `${BASE_URL}/weather?q=${city}&appid=${API_KEY}&units=metric`
-        );
-        
-        if (!currentWeatherResponse.ok) {
-            throw new Error('City not found');
-        }
-        
-        const currentWeatherData = await currentWeatherResponse.json();
-        
-        // Fetch 5-day forecast
-        const forecastResponse = await fetch(
-            `${BASE_URL}/forecast?q=${city}&appid=${API_KEY}&units=metric`
-        );
-        
-        if (!forecastResponse.ok) {
-            throw new Error('Forecast data not available');
-        }
-        
-        const forecastData = await forecastResponse.json();
-        
-        displayWeatherData(currentWeatherData, forecastData);
+        const weatherData = await weatherAPI.getCompleteWeatherDataByCity(city);
+        displayWeatherData(weatherData.current, weatherData.forecast);
     } catch (error) {
-        showError('Unable to find the city. Please check the spelling and try again.');
+        handleWeatherError(error, 'city');
     }
 }
 
@@ -105,35 +98,14 @@ function getWeatherByLocation() {
             const { latitude, longitude } = position.coords;
             
             try {
-                // Fetch current weather
-                const currentWeatherResponse = await fetch(
-                    `${BASE_URL}/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
-                );
-                
-                if (!currentWeatherResponse.ok) {
-                    throw new Error('Weather data not available');
-                }
-                
-                const currentWeatherData = await currentWeatherResponse.json();
-                
-                // Fetch 5-day forecast
-                const forecastResponse = await fetch(
-                    `${BASE_URL}/forecast?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
-                );
-                
-                if (!forecastResponse.ok) {
-                    throw new Error('Forecast data not available');
-                }
-                
-                const forecastData = await forecastResponse.json();
-                
-                displayWeatherData(currentWeatherData, forecastData);
+                const weatherData = await weatherAPI.getCompleteWeatherDataByCoords(latitude, longitude);
+                displayWeatherData(weatherData.current, weatherData.forecast);
             } catch (error) {
-                showError('Unable to fetch weather data for your location.');
+                handleWeatherError(error, 'location');
             }
         },
         (error) => {
-            showError('Unable to retrieve your location. Please enable location services or search for a city.');
+            handleGeolocationError(error);
         }
     );
 }
@@ -175,22 +147,9 @@ function displayWeatherData(currentData, forecastData) {
 function updateForecast(forecastData) {
     forecastContainer.innerHTML = '';
     
-    // Get forecast for next 5 days (8 data points per day, we'll use midday data)
-    const dailyForecasts = {};
+    const processedForecast = weatherAPI.processForecastData(forecastData);
     
-    forecastData.list.forEach(item => {
-        const date = new Date(item.dt * 1000);
-        const dateString = date.toDateString();
-        
-        if (!dailyForecasts[dateString]) {
-            dailyForecasts[dateString] = item;
-        }
-    });
-    
-    // Convert to array and take next 5 days (excluding today)
-    const forecastArray = Object.values(dailyForecasts).slice(1, 6);
-    
-    forecastArray.forEach(day => {
+    processedForecast.forEach(day => {
         const date = new Date(day.dt * 1000);
         const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
         
@@ -200,7 +159,7 @@ function updateForecast(forecastData) {
         forecastItem.innerHTML = `
             <div class="forecast-day">${dayName}</div>
             <div class="forecast-icon">
-                <i class="${getWeatherIconClass(day.weather[0].icon)}"></i>
+                <i class="${weatherAPI.getWeatherIconClass(day.weather[0].icon)}"></i>
             </div>
             <div class="forecast-temp">${Math.round(day.main.temp)}°C</div>
         `;
@@ -211,33 +170,7 @@ function updateForecast(forecastData) {
 
 // Update weather icon based on weather condition
 function updateWeatherIcon(iconCode) {
-    weatherIconEl.className = getWeatherIconClass(iconCode);
-}
-
-// Get Font Awesome icon class based on OpenWeatherMap icon code
-function getWeatherIconClass(iconCode) {
-    const iconMap = {
-        '01d': 'fas fa-sun',
-        '01n': 'fas fa-moon',
-        '02d': 'fas fa-cloud-sun',
-        '02n': 'fas fa-cloud-moon',
-        '03d': 'fas fa-cloud',
-        '03n': 'fas fa-cloud',
-        '04d': 'fas fa-cloud',
-        '04n': 'fas fa-cloud',
-        '09d': 'fas fa-cloud-rain',
-        '09n': 'fas fa-cloud-rain',
-        '10d': 'fas fa-cloud-sun-rain',
-        '10n': 'fas fa-cloud-moon-rain',
-        '11d': 'fas fa-bolt',
-        '11n': 'fas fa-bolt',
-        '13d': 'fas fa-snowflake',
-        '13n': 'fas fa-snowflake',
-        '50d': 'fas fa-smog',
-        '50n': 'fas fa-smog'
-    };
-    
-    return iconMap[iconCode] || 'fas fa-sun';
+    weatherIconEl.className = weatherAPI.getWeatherIconClass(iconCode);
 }
 
 // Format date
@@ -261,9 +194,39 @@ function showError(message) {
     weatherDataEl.style.display = 'none';
 }
 
-// Handle API errors
-function handleApiError(error) {
-    console.error('API Error:', error);
-    showError('There was a problem fetching weather data. Please try again later.');
+// Handle weather API errors
+function handleWeatherError(error, type) {
+    console.error('Weather API Error:', error);
+    
+    if (error.message.includes('404') || error.message.includes('city not found')) {
+        showError('City not found. Please check the spelling and try again.');
+    } else if (error.message.includes('401')) {
+        showError('Invalid API key. Please configure a valid OpenWeatherMap API key.');
+    } else if (error.message.includes('429')) {
+        showError('API rate limit exceeded. Please try again later.');
+    } else if (error.message.includes('network') || error.message.includes('Failed to fetch')) {
+        showError('Network error. Please check your internet connection.');
+    } else {
+        showError(`Unable to fetch weather data for ${type}. Please try again.`);
+    }
 }
 
+// Handle geolocation errors
+function handleGeolocationError(error) {
+    console.error('Geolocation Error:', error);
+    
+    switch(error.code) {
+        case error.PERMISSION_DENIED:
+            showError('Location access denied. Please enable location permissions or search for a city.');
+            break;
+        case error.POSITION_UNAVAILABLE:
+            showError('Location information unavailable. Please search for a city.');
+            break;
+        case error.TIMEOUT:
+            showError('Location request timed out. Please try again.');
+            break;
+        default:
+            showError('Unable to retrieve your location. Please search for a city.');
+            break;
+    }
+}
