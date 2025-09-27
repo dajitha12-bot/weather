@@ -1,4 +1,3 @@
-
 // DOM Elements
 const searchInput = document.querySelector('.search-input');
 const searchBtn = document.querySelector('.search-btn');
@@ -192,9 +191,6 @@ if (API_KEY === 'your_api_key_here') {
     };
     
     // Override the API functions with mock data
-    const originalGetWeatherByCity = getWeatherByCity;
-    const originalGetWeatherByLocation = getWeatherByLocation;
-    
     getWeatherByCity = function(city) {
         showLoading();
         setTimeout(() => {
@@ -218,4 +214,3 @@ if (API_KEY === 'your_api_key_here') {
         }, 1000);
     });
 }
-
